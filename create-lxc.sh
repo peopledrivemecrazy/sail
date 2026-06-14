@@ -8,7 +8,7 @@
 #
 #     CTID=9001 ./create-lxc.sh
 #
-# Override via env: CTID, HOSTNAME, CORES, MEMORY, DISK, SWAP, STORAGE, BRIDGE,
+# Override via env: CTID, CT_HOSTNAME, CORES, MEMORY, DISK, SWAP, STORAGE, BRIDGE,
 # TEMPLATE, TEMPLATE_STORAGE, PASSWORD, SSH_PUBKEY (path to a .pub file).
 # -----------------------------------------------------------------------------
 set -euo pipefail
@@ -17,7 +17,7 @@ die() { printf '[x] %s\n' "$*" >&2; exit 1; }
 command -v pct >/dev/null 2>&1 || die "pct not found — run this on the Proxmox host."
 
 CTID="${CTID:-9001}"
-HOSTNAME="${HOSTNAME:-sail}"
+CT_HOSTNAME="${CT_HOSTNAME:-local-runner}"
 CORES="${CORES:-2}"
 MEMORY="${MEMORY:-4096}"          # MB
 SWAP="${SWAP:-512}"               # MB
@@ -45,7 +45,7 @@ echo "==> Using template: $TEMPLATE"
 
 CREATE_ARGS=(
   "$CTID" "$TEMPLATE"
-  --hostname "$HOSTNAME"
+  --hostname "$CT_HOSTNAME"
   --cores "$CORES"
   --memory "$MEMORY"
   --swap "$SWAP"
@@ -58,7 +58,7 @@ CREATE_ARGS=(
 [ -n "$PASSWORD" ]   && CREATE_ARGS+=(--password "$PASSWORD")
 [ -n "$SSH_PUBKEY" ] && CREATE_ARGS+=(--ssh-public-keys "$SSH_PUBKEY")
 
-echo "==> Creating LXC $CTID ($HOSTNAME): ${CORES} cores / ${MEMORY}MB / ${DISK}GB on $STORAGE"
+echo "==> Creating LXC $CTID ($CT_HOSTNAME): ${CORES} cores / ${MEMORY}MB / ${DISK}GB on $STORAGE"
 pct create "${CREATE_ARGS[@]}"
 
 echo "==> Starting LXC $CTID (onboot=1 — autostarts after host reboot)…"
