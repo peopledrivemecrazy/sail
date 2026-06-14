@@ -1,0 +1,4 @@
+# sail keeps no stored secrets — but ignore local scratch just in case.
+*.log
+config.env
+_work/

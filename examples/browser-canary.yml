@@ -1,0 +1,50 @@
+# sail example — a headed-browser canary "test set".
+#
+# Copy this into your repo at .github/workflows/<name>.yml, then register a sail
+# runner with a matching label:
+#     sudo ./register.sh --repo owner/name --labels self-hosted,my-canary,linux
+#
+# How it reaches the runner: you commit this file; GitHub delivers the job to the
+# sail runner over its outbound connection (the standard self-hosted pull model).
+#
+# The sail image already provides Node, pnpm, git, Xvfb (DISPLAY is preset), and
+# Playwright's Chromium — so a headed browser "just works" with no setup steps.
+
+name: Browser Canary
+
+on:
+  schedule:
+    - cron: '0 7 * * *'    # daily; pick an off-peak hour in your timezone
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write            # only if you open an issue on failure (see last step)
+
+concurrency:
+  group: browser-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    # Must match the labels you passed to register.sh. The sail runner picks it up.
+    runs-on: [self-hosted, my-canary]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node/pnpm are baked into the sail image; this just pins the version.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm i -g pnpm && pnpm install --frozen-lockfile
+
+      # If you pin a Playwright version, this is a cached no-op against the
+      # baked browser store (PLAYWRIGHT_BROWSERS_PATH is preset in the image).
+      - run: pnpm exec playwright install chromium
+
+      # Your actual test set. DISPLAY=:99 is already exported by the runner, so a
+      # headed Chromium (headless:false) renders against the baked Xvfb display.
+      - name: Run the canary
+        run: pnpm test:my-canary      # <-- replace with your command
