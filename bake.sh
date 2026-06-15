@@ -3,8 +3,8 @@
 # sail :: bake.sh
 # -----------------------------------------------------------------------------
 # Turn a fresh Debian/Ubuntu box into the GENERIC sail runner image: the GitHub
-# Actions runner agent + Node + pnpm + Xvfb + Playwright (system libs + a baked
-# Chromium) + git, with a persistent virtual display and autostart wiring.
+# Actions runner agent + Node + pnpm + git + gh + Xvfb + Playwright (system libs
+# + a baked Chromium), with a persistent virtual display and autostart wiring.
 #
 # Contains NO secrets and is repo-agnostic — run it once to make the image, then
 # `register.sh` attaches it to a repo/org with a one-time token. On Proxmox you
@@ -24,7 +24,7 @@ RUNNER_VERSION="${RUNNER_VERSION:-}"                       # empty => latest rel
 NODE_MAJOR="${NODE_MAJOR:-22}"
 INSTALL_BROWSER="${INSTALL_BROWSER:-1}"
 PW_PACKAGE="${PW_PACKAGE:-playwright}"                     # npm pkg for install-deps/install
-PW_BROWSERS_PATH="${PW_BROWSERS_PATH:-/opt/ms-playwright}" # shared, world-readable browser cache
+PW_BROWSERS_PATH="${PW_BROWSERS_PATH:-/opt/ms-playwright}" # shared, runner-owned (writable) browser cache
 XVFB_DISPLAY="${XVFB_DISPLAY:-:99}"
 XVFB_RESOLUTION="${XVFB_RESOLUTION:-1920x1080x24}"
 
@@ -55,6 +55,21 @@ log "Installing base packages…"
 apt-get update -qq
 apt-get install -y --no-install-recommends \
   curl ca-certificates tar git jq sudo
+
+#--- GitHub CLI (gh) ---------------------------------------------------------
+# Workflows that drive `gh` (issues, labels, releases) need it, and it isn't in
+# Debian's default repos — add GitHub's apt source. Idempotent.
+if ! command -v gh >/dev/null 2>&1; then
+  log "Installing GitHub CLI (gh)…"
+  mkdir -p -m 755 /etc/apt/keyrings
+  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
+  chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    > /etc/apt/sources.list.d/github-cli.list
+  apt-get update -qq
+  apt-get install -y gh
+fi
 
 #--- Node + pnpm -------------------------------------------------------------
 if ! command -v node >/dev/null 2>&1 || \
@@ -110,7 +125,10 @@ if [ "$INSTALL_BROWSER" = 1 ]; then
   npx -y "${PW_PACKAGE}" install-deps chromium
   mkdir -p "$PW_BROWSERS_PATH"
   PLAYWRIGHT_BROWSERS_PATH="$PW_BROWSERS_PATH" npx -y "${PW_PACKAGE}" install chromium
-  chmod -R a+rX "$PW_BROWSERS_PATH"
+  # Runner-owned (not root-owned read-only): lets jobs `playwright install` the
+  # exact Chromium revision their pinned Playwright wants (cached) without EACCES.
+  # Avoids a baked-vs-consumer version skew without coupling the image to any project.
+  chown -R "$RUNNER_USER:$RUNNER_USER" "$PW_BROWSERS_PATH"
 
   log "Writing xvfb.service (display $XVFB_DISPLAY as $RUNNER_USER)…"
   cat > /etc/systemd/system/xvfb.service <<EOF
@@ -140,7 +158,7 @@ chown "$RUNNER_USER:$RUNNER_USER" "$RUNNER_DIR/.env" 2>/dev/null || true
 
 #--- done --------------------------------------------------------------------
 echo
-log "Image baked. Utilities ready (runner agent, Node $NODE_MAJOR, pnpm, git$([ "$INSTALL_BROWSER" = 1 ] && echo ", Xvfb, Playwright/Chromium"))."
+log "Image baked. Utilities ready (runner agent, Node $NODE_MAJOR, pnpm, git, gh$([ "$INSTALL_BROWSER" = 1 ] && echo ", Xvfb, Playwright/Chromium"))."
 log "Next: attach it to a repo or org with a one-time token:"
 echo "    sudo ./register.sh --repo owner/name --labels self-hosted,linux --token <ONE-TIME>"
 echo "    sudo ./register.sh --org  your-org   --labels self-hosted,linux --token <ONE-TIME>"
